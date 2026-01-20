@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Share your location</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial; padding: 1rem; max-width: 720px; margin: auto; }
+    button { margin: .5rem 0; padding: .6rem 1rem; font-size: 1rem; }
+    #map { width: 100%; height: 320px; background: #efefef; margin-top: .5rem; border-radius: 8px; overflow: hidden; }
+    pre { background:#111; color:#0f0; padding: .6rem; border-radius:6px; overflow:auto; }
+    .row { display:flex; gap:.5rem; flex-wrap:wrap; }
+    input[type="tel"] { padding:.5rem; font-size:1rem; width: 14rem; }
+  </style>
+</head>
+<body>
+  <h1>Share your location</h1>
+  <p>This page only works if you open it on the phone whose location you want to share and explicitly allow location access.</p>
+
+  <div class="row">
+    <button id="getBtn">Get current location</button>
+    <button id="shareBtn" disabled>Share (Web Share)</button>
+    <button id="copyBtn" disabled>Copy coordinates</button>
+  </div>
+
+  <label for="toNumber">Send via SMS to (optional):</label>
+  <div class="row">
+    <input id="toNumber" type="tel" placeholder="+1234567890" />
+    <button id="smsBtn" disabled>Open SMS app</button>
+  </div>
+
+  <div id="status" style="margin-top:.75rem">Status: idle</div>
+
+  <div id="map" aria-hidden="true"></div>
+
+  <h3>Coordinates</h3>
+  <pre id="coords">no data</pre>
+
+  <script>
+    const getBtn = document.getElementById('getBtn');
+    const shareBtn = document.getElementById('shareBtn');
+    const copyBtn = document.getElementById('copyBtn');
+    const smsBtn = document.getElementById('smsBtn');
+    const toNumber = document.getElementById('toNumber');
+    const status = document.getElementById('status');
+    const coordsPre = document.getElementById('coords');
+    const mapDiv = document.getElementById('map');
+
+    let last = null;
+
+    function setStatus(s) { status.textContent = 'Status: ' + s; }
+
+    function showMap(lat, lon) {
+      // Use a static OpenStreetMap tile link (no API key). This is a simple map snapshot using an <iframe>.
+      const z = 15;
+      const src = `https://www.openstreetmap.org/export/embed.html?bbox=${lon-0.02}%2C${lat-0.02}%2C${lon+0.02}%2C${lat+0.02}&layer=mapnik&marker=${lat}%2C${lon}`;
+      mapDiv.innerHTML = '<iframe src="' + src + '" style="width:100%;height:100%;border:0;"></iframe>';
+    }
+
+    function formatPayload(lat, lon, accuracy, ts) {
+      const when = new Date(ts).toISOString();
+      const googleMaps = `https://maps.google.com/?q=${lat},${lon}`;
+      return `Latitude: ${lat}\nLongitude: ${lon}\nAccuracy (m): ${accuracy}\nTime: ${when}\nMap: ${googleMaps}`;
+    }
+
+    getBtn.addEventListener('click', async () => {
+      if (!('geolocation' in navigator)) {
+        setStatus('Geolocation not supported by this browser.');
+        return;
+      }
+      setStatus('Requesting permission...');
+      navigator.geolocation.getCurrentPosition((pos) => {
+        last = {
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+          ts: pos.timestamp
+        };
+        coordsPre.textContent = formatPayload(last.lat, last.lon, last.accuracy, last.ts);
+        setStatus('Location obtained.');
+        shareBtn.disabled = false;
+        copyBtn.disabled = false;
+        smsBtn.disabled = false;
+        showMap(last.lat, last.lon);
+      }, (err) => {
+        setStatus('Failed to get location: ' + err.message);
+      }, { enableHighAccuracy: true, timeout: 20000 });
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      if (!last) return;
+      try {
+        await navigator.clipboard.writeText(formatPayload(last.lat, last.lon, last.accuracy, last.ts));
+        setStatus('Coordinates copied to clipboard.');
+      } catch (e) {
+        setStatus('Copy failed: ' + e.message);
+      }
+    });
+
+    shareBtn.addEventListener('click', async () => {
+      if (!last) return;
+      const text = formatPayload(last.lat, last.lon, last.accuracy, last.ts);
+      if (navigator.share) {
+        try {
+          await navigator.share({ text, title: 'My location' });
+          setStatus('Shared via native share sheet.');
+        } catch (e) {
+          setStatus('Share canceled or failed.');
+        }
+      } else {
+        setStatus('Web Share API not supported on this device.');
+      }
+    });
+
+    smsBtn.addEventListener('click', () => {
+      if (!last) return;
+      const recipient = toNumber.value.trim();
+      const body = encodeURIComponent(formatPayload(last.lat, last.lon, last.accuracy, last.ts));
+      // sms: URI formats vary by platform. Using sms:recipient?body=... which works on many phones.
+      const smsUri = recipient ? `sms:${recipient}?body=${body}` : `sms:?body=${body}`;
+      // Opening via location.href will open the SMS app on mobile
+      window.location.href = smsUri;
+    });
+
+    // Quick hint: geolocation requires a secure context (HTTPS or localhost).
+    if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+      setStatus('Warning: Geolocation requires HTTPS. Host this page over HTTPS or open on localhost for browsers to allow location.');
+    } else {
+      setStatus('Ready. Tap "Get current location" to start.');
+    }
+  </script>
+</body>
+</html>
